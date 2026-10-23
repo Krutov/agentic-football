@@ -32,7 +32,7 @@ GOAL_HALF_WIDTH = 3.5          # TODO: verify from logs
 SHOOT_RANGE = 22.0
 SPRINT_STAMINA_MIN = 40.0
 PRESS_STAMINA_MIN = 25.0
-MATCH_LENGTH = 300.0
+MATCH_LENGTH = float(os.getenv("MATCH_LENGTH", "120"))  # seconds; draws go to Golden Goal after this
 LOG_RAW_PAYLOAD = os.getenv("LOG_RAW_PAYLOAD", "false").lower() == "true"
 USE_LLM_COACH = os.getenv("USE_LLM_COACH", "false").lower() == "true"
 COACH_MODEL_ID = os.getenv("COACH_MODEL_ID", "us.amazon.nova-micro-v1:0")
@@ -270,11 +270,13 @@ def tactical_mode(s):
 
     remaining = MATCH_LENGTH - s["time"]
     gd = s["goal_diff"]
-    if gd < 0 and remaining < 90:
+    if remaining <= 0 and gd == 0:
+        return "press"  # Golden Goal: next goal wins, win the ball high but keep a back line
+    if gd < 0 and remaining < MATCH_LENGTH * 0.35:
         return "all_out"
     if gd < 0:
         return "press"
-    if gd >= 2 or (gd > 0 and remaining < 60):
+    if gd >= 2 or (gd > 0 and remaining < MATCH_LENGTH * 0.25):
         return "defend"
     return "balanced"
 

@@ -29,7 +29,7 @@ one footballer in a 5v5 match. The same code serves all 5 players.
 - CLEAR_OVERRIDE, RESET
 
 ## Rules
-- 5-minute matches, ball never goes out of play, no penalties.
+- 2-minute matches (MATCH_LENGTH env), draw -> Golden Goal (next goal wins). No outs, offsides, cards or fouls.
 - After a goal: kickoff from center, conceding team kicks off.
 
 ## Engineering rules
