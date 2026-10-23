@@ -13,7 +13,7 @@ BASE_OPP = {0: (52.0, 0.0), 1: (30.0, 0.0), 2: (6.0, 0.0), 3: (-16.0, -11.0), 4:
 
 # Live server pitch (see agent.FIELD_HALF_X/Y): positions are divided by these factors
 LIVE_KX = 55.0 / 6.5
-LIVE_KY = 35.0 / 4.2
+LIVE_KY = 35.0 / 3.6
 
 
 def build_payload(team_id, me_idx, mine=None, opp=None, ball=None, owner=None,

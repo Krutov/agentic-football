@@ -31,8 +31,8 @@ log = logging.getLogger("football")
 # The live match server uses a much smaller pitch (observed: goal lines near x = +-6.5,
 # stamina 0..1). parse_state() detects the scale per payload and converts in and out.
 DOC_HALF_X, DOC_HALF_Y = 55.0, 35.0
-FIELD_HALF_X = float(os.getenv("FIELD_HALF_X", "6.5"))
-FIELD_HALF_Y = float(os.getenv("FIELD_HALF_Y", "4.2"))
+FIELD_HALF_X = float(os.getenv("FIELD_HALF_X", "6.5"))  # observed GK 6.4, ball 6.9
+FIELD_HALF_Y = float(os.getenv("FIELD_HALF_Y", "3.6"))  # observed max |y| 3.5
 EXTENT_LOG_EVERY = int(os.getenv("EXTENT_LOG_EVERY", "25"))
 
 # Tunables (doc units)
