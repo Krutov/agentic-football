@@ -13,7 +13,9 @@ one footballer in a 5v5 match. The same code serves all 5 players.
 - Entry point: `agent.py`, `BedrockAgentCoreApp` + `@app.entrypoint`.
 - Formation 1-1-1-2 as in the Team Console: 0 GK, 1 DEF (centre back), 2 MID, 3 and 4 FWD.
 - Input: `{"prompt": <JSON string or object>}` wrapping `{"gameState": {...}, "teamId": 0|1, "myPlayers": [idx]}`; idx 0 is always the GK.
-- `teamId` 0 (HOME) attacks +x, 1 (AWAY) attacks -x. Pitch x -55..55, y -35..35.
+- `teamId` 0 (HOME) attacks +x, 1 (AWAY) attacks -x.
+- LIVE pitch is small: goal lines near x = +-6.5, y about +-4.2, stamina 0..1 (docs say +-55/+-35 and 0..100, which is wrong for live play; portal fitness checks use doc scale).
+- agent.py converts everything to doc units in parse_state() (detect_scale, normalize_stamina) and back in move(); tune FIELD_HALF_X/FIELD_HALF_Y env vars, check EXTENT log lines.
 - `gameState.teamChat` holds the latest coach instructions from the Player Portal.
 - Output: streamed JSON string of `[{commandType, playerId, teamId, parameters, duration}]` (same as official sample lib/agent_base.py).
 

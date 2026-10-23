@@ -11,9 +11,14 @@ BASE_MINE = {0: (-52.0, 0.0), 1: (-30.0, 0.0), 2: (-6.0, 0.0), 3: (16.0, -11.0),
 BASE_OPP = {0: (52.0, 0.0), 1: (30.0, 0.0), 2: (6.0, 0.0), 3: (-16.0, -11.0), 4: (-16.0, 11.0)}
 
 
+# Live server pitch (see agent.FIELD_HALF_X/Y): positions are divided by these factors
+LIVE_KX = 55.0 / 6.5
+LIVE_KY = 35.0 / 4.2
+
+
 def build_payload(team_id, me_idx, mine=None, opp=None, ball=None, owner=None,
                   chat=None, score=(0, 0), game_time=60.0, stamina=None,
-                  play_mode="OPEN_PLAY"):
+                  play_mode="OPEN_PLAY", live=False):
     """Build a platform-shaped payload.
 
     mine/opp: {idx: (x, y)} overrides in normalized coords.
@@ -22,6 +27,7 @@ def build_payload(team_id, me_idx, mine=None, opp=None, ball=None, owner=None,
     stamina:  {("mine" | "opp", idx): value} overrides, default 100.
     """
     sign = 1.0 if team_id == 0 else -1.0
+    kx, ky, ks = (LIVE_KX, LIVE_KY, 100.0) if live else (1.0, 1.0, 1.0)
     my_code, opp_code = ("home", "away") if team_id == 0 else ("away", "home")
     mine_pos = {**BASE_MINE, **(mine or {})}
     opp_pos = {**BASE_OPP, **(opp or {})}
@@ -33,9 +39,9 @@ def build_payload(team_id, me_idx, mine=None, opp=None, ball=None, owner=None,
             players.append({
                 "agentId": f"agentId_{idx}",
                 "teamCode": code,
-                "position": {"x": x * sign, "y": y},
+                "position": {"x": x * sign / kx, "y": y / ky},
                 "velocity": {"x": 0.0, "y": 0.0},
-                "stamina": stamina.get((side, idx), 100.0),
+                "stamina": stamina.get((side, idx), 100.0) / ks,
                 "currentAction": "IDLE",
             })
 
@@ -52,7 +58,7 @@ def build_payload(team_id, me_idx, mine=None, opp=None, ball=None, owner=None,
             "playMode": play_mode,
             "score": {my_code: score[0], opp_code: score[1]},
             "ball": {
-                "position": {"x": ball[0] * sign, "y": ball[1], "z": 0.0},
+                "position": {"x": ball[0] * sign / kx, "y": ball[1] / ky, "z": 0.0},
                 "velocity": {"x": 0.0, "y": 0.0, "z": 0.0},
                 "isFree": owner is None,
                 "possessionAgentId": f"agentId_{owner[1]}" if owner else None,
@@ -68,12 +74,12 @@ def build_payload(team_id, me_idx, mine=None, opp=None, ball=None, owner=None,
 # ---------- expectation helpers (all in normalized coords) ----------
 
 def nx(c, s):
-    """Normalized target_x of a MOVE_TO command."""
-    return c["parameters"]["target_x"] * s["sign"]
+    """Normalized target_x of a MOVE_TO command, in doc units."""
+    return c["parameters"]["target_x"] * s["sign"] * s["kx"]
 
 
 def ny(c, s):
-    return c["parameters"]["target_y"]
+    return c["parameters"]["target_y"] * s["ky"]
 
 
 def expect_types(*types):
@@ -212,7 +218,7 @@ SCENARIOS = [
          expect=expect_types("GK_DISTRIBUTE")),
     dict(name="centre back does not join attack", me=1,
          kw=dict(owner=("mine", 4), mine={4: (40.0, 5.0)}),
-         expect=expect_move(lambda c, s: nx(c, s) <= -12, "stay in own half")),
+         expect=expect_move(lambda c, s: nx(c, s) <= -11.9, "stay in own half")),
     dict(name="only one outfield player defends deep", me=3,
          kw=dict(owner=("opp", 3), opp={3: (-35.0, -5.0)}, mine={1: (-38.0, -4.0), 2: (-30.0, 0.0)}),
          expect=expect_move(lambda c, s: nx(c, s) >= -25, "forward stays high")),
@@ -231,7 +237,7 @@ CHAT_POOL = [
 ]
 
 
-def random_payload(rng: random.Random):
+def random_payload(rng: random.Random, live=False):
     """Random but structurally valid payload, for fuzzing."""
     def pos():
         return (rng.uniform(-55, 55), rng.uniform(-35, 35))
@@ -258,6 +264,7 @@ def random_payload(rng: random.Random):
         game_time=rng.uniform(0, 180),
         stamina=stamina,
         play_mode=rng.choice(["OPEN_PLAY", "OPEN_PLAY", "KICK_OFF", "FREE_KICK"]),
+        live=live,
     )
 
 

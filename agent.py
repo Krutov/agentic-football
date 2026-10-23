@@ -27,7 +27,15 @@ app = BedrockAgentCoreApp()
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("football")
 
-# Tunables
+# Pitch scale. All decision logic works in "doc units" (x -55..55, y -35..35, stamina 0..100).
+# The live match server uses a much smaller pitch (observed: goal lines near x = +-6.5,
+# stamina 0..1). parse_state() detects the scale per payload and converts in and out.
+DOC_HALF_X, DOC_HALF_Y = 55.0, 35.0
+FIELD_HALF_X = float(os.getenv("FIELD_HALF_X", "6.5"))
+FIELD_HALF_Y = float(os.getenv("FIELD_HALF_Y", "4.2"))
+EXTENT_LOG_EVERY = int(os.getenv("EXTENT_LOG_EVERY", "25"))
+
+# Tunables (doc units)
 GOAL_X = 55.0
 OWN_GOAL_X = -55.0
 GOAL_HALF_WIDTH = 3.5          # TODO: verify from logs
@@ -81,6 +89,7 @@ KEYWORDS = [
 _coach_cache = {}
 _bedrock = None
 _raw_logged = 0
+_extent = {"x": 0.0, "y": 0.0, "bx": 0.0, "by": 0.0, "n": 0}
 
 
 # ---------- helpers ----------
@@ -148,14 +157,46 @@ def lane_clear(ax, ay, bx, by, opps, margin=2.5):
 
 
 def move(s, x, y, sprint=False):
+    """MOVE_TO in doc units; converted back to the server's pitch scale and attack direction."""
     me = s["me"]
     sprint = bool(sprint and me["stamina"] >= SPRINT_STAMINA_MIN)
     return cmd(
         me["idx"], "MOVE_TO",
-        target_x=round(clamp(x, -54, 54) * s["sign"], 2),  # de-normalize x
-        target_y=round(clamp(y, -34, 34), 2),
+        target_x=round(clamp(x, -54, 54) / s["kx"] * s["sign"], 3),
+        target_y=round(clamp(y, -34, 34) / s["ky"], 3),
         sprint=sprint,
     )
+
+
+def detect_scale(raw_xs, raw_ys):
+    """Return (kx, ky): multipliers from server units to doc units.
+
+    Doc-scale payloads (portal fitness checks, docs) have coordinates far beyond the live
+    pitch, so anything clearly larger than FIELD_HALF_X is treated as doc scale.
+    """
+    max_x = max((abs(v) for v in raw_xs), default=0.0)
+    max_y = max((abs(v) for v in raw_ys), default=0.0)
+    if max_x > FIELD_HALF_X * 1.6 or max_y > FIELD_HALF_Y * 1.6:
+        return 1.0, 1.0
+    return DOC_HALF_X / FIELD_HALF_X, DOC_HALF_Y / FIELD_HALF_Y
+
+
+def normalize_stamina(v):
+    """Server sends 0..1; docs and fitness checks send 0..100. Return 0..100."""
+    v = float(v)
+    return v * 100.0 if v <= 1.0 else v
+
+
+def _track_extent(raw_players, raw_ball):
+    """Log the largest coordinates seen so far, to calibrate FIELD_HALF_X/Y."""
+    for x, y in raw_players:
+        _extent["x"] = max(_extent["x"], abs(x))
+        _extent["y"] = max(_extent["y"], abs(y))
+    _extent["bx"] = max(_extent["bx"], abs(raw_ball[0]))
+    _extent["by"] = max(_extent["by"], abs(raw_ball[1]))
+    _extent["n"] += 1
+    if EXTENT_LOG_EVERY and _extent["n"] % EXTENT_LOG_EVERY == 0:
+        log.info("EXTENT %s", json.dumps({k: round(v, 3) for k, v in _extent.items()}))
 
 
 # ---------- state parsing ----------
@@ -183,25 +224,32 @@ def parse_state(payload):
     my_code = "home" if team_id == 0 else "away"
     my_idx = int((payload.get("myPlayers") or [0])[0])
 
-    players = []
+    raw = []
     for p in gs.get("players", []):
         try:
             idx = int(str(p.get("agentId", "")).split("_")[-1])
         except ValueError:
             continue
         pos = p.get("position", {}) or {}
-        players.append({
-            "idx": idx,
-            "mine": str(p.get("teamCode", "")).lower() == my_code,
-            "x": float(pos.get("x", 0.0)) * sign,
-            "y": float(pos.get("y", 0.0)),
-            "stamina": float(p.get("stamina", 100.0)),
-        })
+        raw.append((idx, p, float(pos.get("x", 0.0)), float(pos.get("y", 0.0))))
 
     ball = gs.get("ball", {}) or {}
     bpos = ball.get("position", {}) or {}
-    bx = float(bpos.get("x", 0.0)) * sign
-    by = float(bpos.get("y", 0.0))
+    raw_bx, raw_by = float(bpos.get("x", 0.0)), float(bpos.get("y", 0.0))
+
+    kx, ky = detect_scale([r[2] for r in raw] + [raw_bx], [r[3] for r in raw] + [raw_by])
+    _track_extent([(r[2], r[3]) for r in raw], (raw_bx, raw_by))
+
+    players = [{
+        "idx": idx,
+        "mine": str(p.get("teamCode", "")).lower() == my_code,
+        "x": x * kx * sign,
+        "y": y * ky,
+        "stamina": normalize_stamina(p.get("stamina", 100.0)),
+    } for idx, p, x, y in raw]
+
+    bx = raw_bx * kx * sign
+    by = raw_by * ky
 
     mates = [p for p in players if p["mine"]]
     opps = [p for p in players if not p["mine"]]
@@ -227,6 +275,8 @@ def parse_state(payload):
 
     return {
         "sign": sign,
+        "kx": kx,
+        "ky": ky,
         "tick": gs.get("tick"),
         "time": float(gs.get("gameTime", 0.0)),
         "play_mode": gs.get("playMode", "OPEN_PLAY"),

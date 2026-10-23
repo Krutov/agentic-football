@@ -89,6 +89,14 @@ def validate_command(c, state):
             if err:
                 errors.append(f"{ctype}.{name}: {err}")
 
+    # Live pitch: MOVE_TO must stay inside the server's small pitch
+    if ctype == "MOVE_TO" and state.get("kx", 1.0) > 1.0:
+        import agent
+        if abs(params.get("target_x", 0)) > agent.FIELD_HALF_X + 1e-6:
+            errors.append(f"MOVE_TO.target_x {params['target_x']} outside live pitch +-{agent.FIELD_HALF_X}")
+        if abs(params.get("target_y", 0)) > agent.FIELD_HALF_Y + 1e-6:
+            errors.append(f"MOVE_TO.target_y {params['target_y']} outside live pitch +-{agent.FIELD_HALF_Y}")
+
     # Game rules
     has_ball = state["owner"] is me
     if ctype in POSSESSION_REQUIRED and not has_ball:

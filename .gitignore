@@ -6,3 +6,6 @@ __pycache__/
 arns.txt
 team/players/
 team/agentcore/aws-targets.json.bak
+logs/
+invoke_payload.json
+invoke_out.txt

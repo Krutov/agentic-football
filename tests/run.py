@@ -63,9 +63,10 @@ def check_decision(rep, where, state, commands, ms, verbose):
 
 def run_scenarios(rep, verbose):
     for sc in SCENARIOS:
-        for team_id in (0, 1):
-            where = f"[scenario] {sc['name']} (team {team_id})"
-            payload = build_payload(team_id, sc["me"], **sc["kw"])
+        for team_id, live in ((0, False), (1, False), (0, True), (1, True)):
+            scale = "live pitch" if live else "doc pitch"
+            where = f"[scenario] {sc['name']} (team {team_id}, {scale})"
+            payload = build_payload(team_id, sc["me"], live=live, **sc["kw"])
             state, commands, mode, ms = decide_timed(payload)
             if not check_decision(rep, where, state, commands, ms, verbose):
                 continue
@@ -80,7 +81,7 @@ def run_scenarios(rep, verbose):
 def run_fuzz(rep, n, seed, verbose):
     rng = random.Random(seed)
     for i in range(n):
-        payload = random_payload(rng)
+        payload = random_payload(rng, live=bool(i % 2))
         state, commands, mode, ms = decide_timed(payload)
         if check_decision(rep, f"[fuzz #{i} seed={seed}]", state, commands, ms, verbose):
             rep.ok()
@@ -190,7 +191,7 @@ def main():
     run_serializer(rep)
 
     lat = rep.latencies
-    print(f"Scenarios: {len(SCENARIOS)} x 2 teams | fuzz: {args.fuzz} | "
+    print(f"Scenarios: {len(SCENARIOS)} x 2 teams x 2 pitch scales | fuzz: {args.fuzz} | "
           f"malformed: {len(MALFORMED_PAYLOADS)} | serializer: 4 | wire contract: 8")
     if lat:
         p95 = sorted(lat)[int(len(lat) * 0.95) - 1]
