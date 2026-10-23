@@ -1,0 +1,29 @@
+{
+  "gameState": {
+    "tick": 42,
+    "gameTime": 84.0,
+    "playMode": "OPEN_PLAY",
+    "score": { "home": 0, "away": 1 },
+    "ball": {
+      "position": { "x": 30.0, "y": -3.0, "z": 0.0 },
+      "velocity": { "x": 1.2, "y": 0.0, "z": 0.0 },
+      "isFree": false,
+      "possessionAgentId": "agentId_4"
+    },
+    "players": [
+      { "agentId": "agentId_0", "teamCode": "home", "position": { "x": -52, "y": 0 }, "stamina": 100 },
+      { "agentId": "agentId_1", "teamCode": "home", "position": { "x": -20, "y": -12 }, "stamina": 90 },
+      { "agentId": "agentId_2", "teamCode": "home", "position": { "x": -20, "y": 12 }, "stamina": 85 },
+      { "agentId": "agentId_3", "teamCode": "home", "position": { "x": 10, "y": 5 }, "stamina": 70 },
+      { "agentId": "agentId_4", "teamCode": "home", "position": { "x": 30, "y": -3 }, "stamina": 60 },
+      { "agentId": "agentId_0", "teamCode": "away", "position": { "x": 52, "y": 1 }, "stamina": 100 },
+      { "agentId": "agentId_1", "teamCode": "away", "position": { "x": 35, "y": -8 }, "stamina": 90 },
+      { "agentId": "agentId_2", "teamCode": "away", "position": { "x": 38, "y": 6 }, "stamina": 90 },
+      { "agentId": "agentId_3", "teamCode": "away", "position": { "x": 15, "y": 0 }, "stamina": 80 },
+      { "agentId": "agentId_4", "teamCode": "away", "position": { "x": -5, "y": 0 }, "stamina": 80 }
+    ],
+    "teamChat": ["Push forward, we need a goal"]
+  },
+  "teamId": 0,
+  "myPlayers": [4]
+}
