@@ -71,9 +71,11 @@ if (-not (Get-Command aws -ErrorAction SilentlyContinue)) {
 
 $identityJson = aws sts get-caller-identity --output json 2>&1
 if ($LASTEXITCODE -ne 0) {
-    Fail "AWS credentials are not valid: $identityJson`nSet AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY / AWS_SESSION_TOKEN from the workshop account."
+    # stderr lines arrive as ErrorRecords; keep only their message text
+    $awsError = (($identityJson | ForEach-Object { $_.ToString() }) -join " ").Trim()
+    Fail "AWS credentials are not valid: $awsError`nSet AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY / AWS_SESSION_TOKEN from the workshop account."
 }
-$identity = $identityJson | ConvertFrom-Json
+$identity = ($identityJson | ForEach-Object { $_.ToString() }) -join "`n" | ConvertFrom-Json
 Write-Host "AWS account: $($identity.Account)  identity: $($identity.Arn)  region: $Region"
 
 # 2. Offline tests
