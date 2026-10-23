@@ -11,6 +11,7 @@ one footballer in a 5v5 match. The same code serves all 5 players.
 ## Runtime contract
 - Invoked ~every 2 s per player; hard timeout 5 s (on timeout the player keeps its last command).
 - Entry point: `agent.py`, `BedrockAgentCoreApp` + `@app.entrypoint`.
+- Formation 1-1-1-2 as in the Team Console: 0 GK, 1 DEF (centre back), 2 MID, 3 and 4 FWD.
 - Input: `{"prompt": <JSON string or object>}` wrapping `{"gameState": {...}, "teamId": 0|1, "myPlayers": [idx]}`; idx 0 is always the GK.
 - `teamId` 0 (HOME) attacks +x, 1 (AWAY) attacks -x. Pitch x -55..55, y -35..35.
 - `gameState.teamChat` holds the latest coach instructions from the Player Portal.

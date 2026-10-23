@@ -60,12 +60,16 @@ MODES = ("balanced", "all_out", "press", "defend", "possession")
 
 # Base shape in normalized coords (attacking +x). Index 0 = GK.
 # Keep in sync with the formation selected in the Player Portal.
+# 1-1-1-2, matches the Team Console positions: GK, DEF, MID, FWD, FWD
 FORMATION = {
-    1: (-32.0, -12.0),  # left back
-    2: (-32.0, 12.0),   # right back
-    3: (-8.0, 0.0),     # central midfielder
-    4: (18.0, 0.0),     # striker
+    1: (-30.0, 0.0),    # centre back (DEF)
+    2: (-6.0, 0.0),     # central midfielder (MID)
+    3: (16.0, -11.0),   # left forward (FWD)
+    4: (16.0, 11.0),    # right forward (FWD)
 }
+DEF_IDX, MID_IDX, FWD_IDXS = 1, 2, (3, 4)
+GK_RUSH_RADIUS = 9.0     # GK leaves the line only for a loose ball this close to goal
+GK_LINE_X = OWN_GOAL_X + 2.0
 
 KEYWORDS = [
     ("all_out", ["all out", "all-out", "need a goal", "push forward", "attack"]),
@@ -348,14 +352,21 @@ def pick_corner(s):
 def goalkeeper(s, mode):
     me, bx, by = s["me"], s["bx"], s["by"]
     if s["owner"] is me:
+        # Always release the ball immediately; never dribble out of the goal
         target = best_outlet(s)
+        if target is None:
+            outfield = [m for m in s["mates"] if m["idx"] != 0]
+            target = max(outfield, key=lambda m: m["x"]) if outfield else None
         if target:
             return cmd(me["idx"], "GK_DISTRIBUTE", target_player_id=target["idx"], method="KICK")
-    # Rush a loose ball only when it is close to our goal and we are the nearest player
-    if s["owner"] is None and dist(bx, by, OWN_GOAL_X, 0) < 14:
+    # Leave the line only for a loose ball right in front of goal that we reach first
+    if s["owner"] is None and dist(bx, by, OWN_GOAL_X, 0) < GK_RUSH_RADIUS:
         if closest_to_ball(s["mates"], bx, by) is me:
             return move(s, bx, by, sprint=True)
-    return move(s, OWN_GOAL_X + 2.5, clamp(by * 0.35, -GOAL_HALF_WIDTH, GOAL_HALF_WIDTH))
+    # Stay on the line, shading toward the ball side; sprint back if pulled out
+    ty = clamp(by * 0.35, -GOAL_HALF_WIDTH, GOAL_HALF_WIDTH)
+    out_of_position = dist(me["x"], me["y"], GK_LINE_X, ty) > 4
+    return move(s, GK_LINE_X, ty, sprint=out_of_position)
 
 
 def with_ball(s, mode):
@@ -387,7 +398,9 @@ def support(s, mode):
     push = {"all_out": 14, "press": 8, "balanced": 4, "possession": 2, "defend": -6}[mode]
     tx = fx + bx * 0.4 + push
     ty = fy + s["by"] * 0.3
-    if me["idx"] == 4:  # striker stays on the last line, ready for a through ball
+    if me["idx"] == DEF_IDX:  # centre back never joins the attack
+        tx = min(tx, -12.0 if mode != "all_out" else 0.0)
+    if me["idx"] in FWD_IDXS:  # forwards stay ahead of the ball, ready for a through ball
         tx = max(tx, bx + 8)
     far = dist(me["x"], me["y"], tx, ty) > 15
     return move(s, tx, ty, sprint=far)
@@ -401,21 +414,20 @@ def defend(s, mode):
         intensity = {"press": 0.9, "all_out": 0.85, "defend": 0.45}.get(mode, 0.7)
         return cmd(me["idx"], "PRESS_BALL", intensity=intensity)
 
-    if me["idx"] in (1, 2):
-        # Stay goal-side: on the line between the ball and our goal
-        side = -1 if me["idx"] == 1 else 1
-        depth = 0.30 if mode == "defend" else 0.45
+    if me["idx"] == DEF_IDX:
+        # Single centre back: goal-side of the ball, between it and the goal centre
+        depth = 0.35 if mode == "defend" else 0.5
         tx = OWN_GOAL_X + (bx - OWN_GOAL_X) * depth
-        ty = by * 0.5 + side * 6
-        return move(s, max(tx, -48), ty, sprint=bx < -20)
+        return move(s, clamp(tx, -46, -10), by * 0.6, sprint=bx < -20)
 
-    if me["idx"] == 3:
+    if me["idx"] == MID_IDX:
         return cmd(me["idx"], "INTERCEPT", aggressive=mode in ("press", "all_out"))
 
-    # Striker: chase in press modes, otherwise wait high for the counter
+    # Forwards: chase in press modes, otherwise hold wide and high for the counter
     if mode in ("press", "all_out"):
         return cmd(me["idx"], "INTERCEPT", aggressive=True)
-    return move(s, max(bx + 12, 0), by * 0.4)
+    _, fy = FORMATION[me["idx"]]
+    return move(s, max(bx + 12, 0), fy * 0.8 + by * 0.2)
 
 
 def loose_ball(s, mode):

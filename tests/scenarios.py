@@ -7,8 +7,8 @@ x axis for AWAY, so one scenario checks direction handling on both sides.
 
 import random
 
-BASE_MINE = {0: (-52.0, 0.0), 1: (-30.0, -12.0), 2: (-30.0, 12.0), 3: (-5.0, 0.0), 4: (18.0, 0.0)}
-BASE_OPP = {0: (52.0, 0.0), 1: (30.0, -12.0), 2: (30.0, 12.0), 3: (5.0, 0.0), 4: (-18.0, 0.0)}
+BASE_MINE = {0: (-52.0, 0.0), 1: (-30.0, 0.0), 2: (-6.0, 0.0), 3: (16.0, -11.0), 4: (16.0, 11.0)}
+BASE_OPP = {0: (52.0, 0.0), 1: (30.0, 0.0), 2: (6.0, 0.0), 3: (-16.0, -11.0), 4: (-16.0, 11.0)}
 
 
 def build_payload(team_id, me_idx, mine=None, opp=None, ball=None, owner=None,
@@ -150,16 +150,16 @@ SCENARIOS = [
          kw=dict(ball=(-47.0, 2.0), mine={1: (-30.0, -12.0), 2: (-30.0, 12.0)}),
          expect=expect_move(lambda c, s: abs(nx(c, s) - s["bx"]) < 0.5 and c["parameters"]["sprint"],
                             "sprint to the ball")),
-    dict(name="nearest player presses ball carrier", me=3,
+    dict(name="nearest player presses ball carrier", me=2,
          kw=dict(owner=("opp", 3), opp={3: (0.0, 0.0)}),
          expect=expect_types("PRESS_BALL")),
-    dict(name="exhausted nearest player does not press", me=3,
-         kw=dict(owner=("opp", 3), opp={3: (0.0, 0.0)}, stamina={("mine", 3): 10.0}),
+    dict(name="exhausted nearest player does not press", me=2,
+         kw=dict(owner=("opp", 3), opp={3: (0.0, 0.0)}, stamina={("mine", 2): 10.0}),
          expect=expect_not("PRESS_BALL")),
     dict(name="defender stays goal-side", me=1,
          kw=dict(owner=("opp", 4), opp={4: (-20.0, 5.0)}, mine={3: (-21.0, 4.0)}),
          expect=expect_move(lambda c, s: nx(c, s) < s["bx"], "between ball and own goal")),
-    dict(name="nearest player chases loose ball", me=3,
+    dict(name="nearest player chases loose ball", me=2,
          kw=dict(ball=(0.0, 5.0)),
          expect=expect_move(lambda c, s: abs(nx(c, s) - s["bx"]) < 0.5, "run to the ball")),
     dict(name="far player keeps shape on loose ball", me=1,
@@ -201,6 +201,21 @@ SCENARIOS = [
     dict(name="golden goal presses", me=3,
          kw=dict(score=(1, 1), game_time=135.0),
          expect=expect_mode("press")),
+    dict(name="goalkeeper ignores loose ball 12 units out", me=0,
+         kw=dict(ball=(-43.0, 0.0), mine={1: (-20.0, 0.0), 2: (-5.0, 0.0)}),
+         expect=expect_move(lambda c, s: nx(c, s) <= -50, "stay on the line")),
+    dict(name="goalkeeper pulled out sprints back", me=0,
+         kw=dict(mine={0: (-40.0, 10.0)}, owner=("opp", 2), opp={2: (5.0, 0.0)}),
+         expect=expect_move(lambda c, s: nx(c, s) <= -50 and c["parameters"]["sprint"], "sprint back to line")),
+    dict(name="goalkeeper without outlet still distributes", me=0,
+         kw=dict(owner=("mine", 0), opp={1: (-45.0, -3.0), 2: (-45.0, 3.0), 3: (-30.0, 0.0), 4: (-20.0, 0.0)}),
+         expect=expect_types("GK_DISTRIBUTE")),
+    dict(name="centre back does not join attack", me=1,
+         kw=dict(owner=("mine", 4), mine={4: (40.0, 5.0)}),
+         expect=expect_move(lambda c, s: nx(c, s) <= -12, "stay in own half")),
+    dict(name="only one outfield player defends deep", me=3,
+         kw=dict(owner=("opp", 3), opp={3: (-35.0, -5.0)}, mine={1: (-38.0, -4.0), 2: (-30.0, 0.0)}),
+         expect=expect_move(lambda c, s: nx(c, s) >= -25, "forward stays high")),
     dict(name="kickoff does not break decisions", me=4,
          kw=dict(play_mode="KICK_OFF", owner=("mine", 4), mine={4: (0.0, 0.0)}),
          expect=None),
