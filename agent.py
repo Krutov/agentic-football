@@ -8,9 +8,9 @@ Design:
   - The same code serves all 5 players: role comes from payload["myPlayers"][0].
   - All geometry is normalized so that "we" always attack toward +x.
 
-NOTE: the command JSON shape (commandType/parameters) and the response wrapper
-      are assumptions. Verify them against the workshop template and adjust
-      cmd() / invoke() if needed.
+NOTE: the wire format (commandType/parameters, bare list) is an assumption.
+      If the workshop template differs, switch it with the CMD_* and
+      RESPONSE_WRAPPER env vars (see serialize()) instead of editing the logic.
 """
 
 import json
@@ -37,6 +37,16 @@ LOG_RAW_PAYLOAD = os.getenv("LOG_RAW_PAYLOAD", "false").lower() == "true"
 USE_LLM_COACH = os.getenv("USE_LLM_COACH", "false").lower() == "true"
 COACH_MODEL_ID = os.getenv("COACH_MODEL_ID", "us.amazon.nova-micro-v1:0")
 
+# Output format adapter (switch via env vars without touching the decision logic)
+#   CMD_PLAYER_KEY   key for the player id            (default "playerId")
+#   CMD_TYPE_KEY     key for the command name         (default "commandType")
+#   CMD_PARAMS_KEY   key for the parameters object    (default "parameters"; empty = flat)
+#   RESPONSE_WRAPPER wrap the list as {key: [...]}    (default empty = bare list)
+CMD_PLAYER_KEY = os.getenv("CMD_PLAYER_KEY", "playerId")
+CMD_TYPE_KEY = os.getenv("CMD_TYPE_KEY", "commandType")
+CMD_PARAMS_KEY = os.getenv("CMD_PARAMS_KEY", "parameters")
+RESPONSE_WRAPPER = os.getenv("RESPONSE_WRAPPER", "")
+
 MODES = ("balanced", "all_out", "press", "defend", "possession")
 
 # Base shape in normalized coords (attacking +x). Index 0 = GK.
@@ -62,8 +72,34 @@ _bedrock = None
 # ---------- helpers ----------
 
 def cmd(player_id, command_type, **params):
-    """Build one command. Change the shape here if the platform expects another schema."""
+    """Build one command in the canonical internal shape (see serialize() for output)."""
     return {"playerId": player_id, "commandType": command_type, "parameters": params}
+
+
+def serialize(commands, player_key=None, type_key=None, params_key=None):
+    """Convert canonical commands into the wire format configured via env vars."""
+    player_key = CMD_PLAYER_KEY if player_key is None else player_key
+    type_key = CMD_TYPE_KEY if type_key is None else type_key
+    params_key = CMD_PARAMS_KEY if params_key is None else params_key
+    out = []
+    for c in commands:
+        item = {player_key: c["playerId"], type_key: c["commandType"]}
+        if params_key:
+            item[params_key] = dict(c["parameters"])
+        else:
+            for k, v in c["parameters"].items():
+                if k in item:
+                    log.warning("Flat format: parameter '%s' collides with a reserved key, skipped", k)
+                    continue
+                item[k] = v
+        out.append(item)
+    return out
+
+
+def wrap_response(items, wrapper=None):
+    """Return a bare list or {wrapper: list} depending on RESPONSE_WRAPPER."""
+    wrapper = RESPONSE_WRAPPER if wrapper is None else wrapper
+    return {wrapper: items} if wrapper else items
 
 
 def dist(ax, ay, bx, by):
@@ -391,10 +427,10 @@ def invoke(payload):
             "commands": commands,
             "ms": round((time.perf_counter() - started) * 1000, 1),
         }))
-        return commands  # TODO: wrap as {"commands": commands} if the template does so
+        return wrap_response(serialize(commands))
     except Exception:
         log.exception("Decision failed, returning no commands")
-        return []
+        return wrap_response([])
 
 
 if __name__ == "__main__":

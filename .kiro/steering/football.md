@@ -38,3 +38,6 @@ one footballer in a 5v5 match. The same code serves all 5 players.
 - Never raise from the entrypoint; on error return [] and log.
 - Code comments, log messages and output strings in English only.
 - Log one JSON line per decision: tick, player, mode, commands, ms.
+- Wire format is produced only by serialize()/wrap_response(); change it via CMD_* / RESPONSE_WRAPPER env vars, not in the decision logic.
+- After any change run `python -m tests.run` and keep it green; add a scenario in tests/scenarios.py for every new behavior (scenarios are mirrored for both teams).
+- Deploy with `.\scripts\deploy.ps1` (Windows PowerShell); it runs the tests first.
