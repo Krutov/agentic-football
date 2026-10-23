@@ -156,17 +156,18 @@ def print_arns(region):
     found = {}
     if out:
         for rt in json.loads(out).get("agentRuntimes", []):
+            # CDK prefixes runtime names with the project name: FootballRuleEngine_football_p0
             name = rt.get("agentRuntimeName", "")
-            if name.startswith(RUNTIME_PREFIX):
+            if RUNTIME_PREFIX in name:
                 found[name] = rt.get("agentRuntimeArn", "")
     if not found:
         print("WARNING: could not list runtimes; check the AgentCore console or 'agentcore status'")
         return
-    lines = [f"{name}\t{found[name]}" for name in sorted(found)]
+    lines = [f"{name}\t{found[name]}" for name in sorted(found, key=lambda n: n[-1])]
     (REPO_ROOT / "arns.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
     for line in lines:
         print(f"  {line}")
-    print("\nRegister football_p0 as player 0 (GK), football_p1..p4 as players 1..4 in the Team Console.")
+    print("\nRegister ..._football_p0 as player 0 (GK), ..._p1..p4 as players 1..4 in the Team Console.")
     print("Saved to arns.txt")
 
 
