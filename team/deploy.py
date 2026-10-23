@@ -48,20 +48,43 @@ dependencies = [
 """
 
 
+_NPM_BIN = None
+
+
+def npm_bin_dir():
+    """Directory with global npm CLIs (npm prefix on Windows, <prefix>/bin elsewhere)."""
+    global _NPM_BIN
+    if _NPM_BIN is None:
+        npm = shutil.which("npm")
+        prefix = ""
+        if npm:
+            r = subprocess.run([npm, "config", "get", "prefix"], capture_output=True, text=True)
+            prefix = r.stdout.strip() if r.returncode == 0 else ""
+        _NPM_BIN = (prefix if os.name == "nt" else os.path.join(prefix, "bin")) if prefix else ""
+    return _NPM_BIN
+
+
 def resolve_exe(name):
+    """Resolve a CLI; 'agentcore' must be the npm AgentCore CLI, not the pip starter toolkit."""
+    if name == "agentcore" and npm_bin_dir():
+        for candidate in ("agentcore.cmd", "agentcore"):
+            path = os.path.join(npm_bin_dir(), candidate)
+            if os.path.isfile(path):
+                return path
+        return None
     # npm CLIs are .cmd shims on Windows; shutil.which honors PATHEXT
-    return shutil.which(name) or name
+    return shutil.which(name)
 
 
 def run(cmd, **kwargs):
-    cmd = [resolve_exe(cmd[0])] + list(cmd[1:])
+    cmd = [resolve_exe(cmd[0]) or cmd[0]] + list(cmd[1:])
     print(f"  $ {' '.join(cmd)}")
     kwargs.setdefault("env", os.environ.copy())
     subprocess.run(cmd, check=True, **kwargs)
 
 
 def capture(cmd):
-    result = subprocess.run([resolve_exe(cmd[0])] + list(cmd[1:]), capture_output=True, text=True)
+    result = subprocess.run([resolve_exe(cmd[0]) or cmd[0]] + list(cmd[1:]), capture_output=True, text=True)
     return result.stdout.strip() if result.returncode == 0 else None
 
 
@@ -81,13 +104,15 @@ def banner(text):
 
 def preflight():
     banner("Pre-flight checks")
-    missing = [t for t in ("agentcore", "aws", "node", "cdk", "uv") if not shutil.which(t)]
+    missing = [t for t in ("node", "npm", "agentcore", "cdk", "uv", "aws") if not resolve_exe(t)]
     if missing:
         print(f"ERROR: missing tools: {', '.join(missing)}")
-        print("  npm install -g @aws/agentcore aws-cdk")
-        print("  uv: powershell -ExecutionPolicy ByPass -c \"irm https://astral.sh/uv/install.ps1 | iex\"")
+        print("  Node.js:          winget install -e --id OpenJS.NodeJS.LTS")
+        print("  AgentCore + CDK:  npm install -g @aws/agentcore aws-cdk")
+        print("  uv:               winget install -e --id astral-sh.uv")
+        print("  Then open a new terminal so PATH is refreshed.")
         sys.exit(1)
-    print(f"  agentcore version: {capture(['agentcore', '--version']) or 'unknown'}")
+    print(f"  agentcore: {resolve_exe('agentcore')} ({capture(['agentcore', '--version']) or 'unknown version'})")
 
     account = capture(["aws", "sts", "get-caller-identity", "--query", "Account", "--output", "text"])
     if not account:
