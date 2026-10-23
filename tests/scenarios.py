@@ -119,6 +119,17 @@ def expect_forward_progress(c, s, mode):
     return f"expected PASS or forward MOVE_TO, got {c['commandType']}"
 
 
+def expect_cmd(ctype, **params):
+    def check(c, s, mode):
+        if c["commandType"] != ctype:
+            return f"expected {ctype}, got {c['commandType']}"
+        for k, v in params.items():
+            if c["parameters"].get(k) != v:
+                return f"{ctype}.{k} = {c['parameters'].get(k)!r}, expected {v!r}"
+        return None
+    return check
+
+
 def expect_pass_to(target):
     def check(c, s, mode):
         if c["commandType"] != "PASS":
@@ -162,12 +173,15 @@ SCENARIOS = [
     dict(name="exhausted nearest player does not press", me=2,
          kw=dict(owner=("opp", 3), opp={3: (0.0, 0.0)}, stamina={("mine", 2): 10.0}),
          expect=expect_not("PRESS_BALL")),
-    dict(name="defender stays goal-side", me=1,
+    dict(name="defender marks most dangerous attacker", me=1,
          kw=dict(owner=("opp", 4), opp={4: (-20.0, 5.0)}, mine={3: (-21.0, 4.0)}),
+         expect=expect_cmd("MARK", target_player_id=4, tightness="TIGHT")),
+    dict(name="defender holds goal-side when no attacker in our half", me=1,
+         kw=dict(owner=("opp", 2), opp={2: (10.0, 0.0), 3: (15.0, -10.0), 4: (15.0, 10.0)}),
          expect=expect_move(lambda c, s: nx(c, s) < s["bx"], "between ball and own goal")),
-    dict(name="nearest player chases loose ball", me=2,
+    dict(name="nearest player intercepts loose ball", me=2,
          kw=dict(ball=(0.0, 5.0)),
-         expect=expect_move(lambda c, s: abs(nx(c, s) - s["bx"]) < 0.5, "run to the ball")),
+         expect=expect_cmd("INTERCEPT", aggressive=True)),
     dict(name="far player keeps shape on loose ball", me=1,
          kw=dict(ball=(20.0, 0.0)),
          expect=expect_move(lambda c, s: abs(nx(c, s) - s["bx"]) > 5, "do not chase")),
@@ -230,16 +244,17 @@ SCENARIOS = [
     dict(name="centre back does not join attack", me=1,
          kw=dict(owner=("mine", 4), mine={4: (40.0, 5.0)}),
          expect=expect_move(lambda c, s: nx(c, s) <= -11.9, "stay in own half")),
-    dict(name="forward stays high when ball is in midfield", me=3,
+    dict(name="far forward stays high when ball is in midfield", me=4,
          kw=dict(owner=("opp", 3), opp={3: (-10.0, -5.0)}, mine={1: (-25.0, -4.0), 2: (-12.0, -3.0)}),
          expect=expect_move(lambda c, s: nx(c, s) >= 0, "forward stays high")),
-    dict(name="midfielder recovers when ball in our third", me=2,
-         kw=dict(owner=("opp", 2), opp={2: (-30.0, 5.0)}, mine={1: (-32.0, 4.0), 2: (0.0, 0.0)}),
-         expect=expect_move(lambda c, s: nx(c, s) < -20 and c["parameters"]["sprint"], "drop goal-side")),
-    dict(name="nearer forward tracks back in danger", me=3,
+    dict(name="midfielder intercepts (not aggressive) when ball in our third", me=2,
+         kw=dict(owner=("opp", 2), opp={2: (-30.0, 5.0)}, mine={1: (-32.0, 4.0), 2: (0.0, 0.0)},
+                 score=(0, 1), game_time=30.0),
+         expect=expect_cmd("INTERCEPT", aggressive=False)),
+    dict(name="nearer forward works back via intercept", me=3,
          kw=dict(owner=("opp", 2), opp={2: (-30.0, -8.0)}, mine={1: (-32.0, -6.0), 2: (-28.0, -2.0),
                                                                 3: (-5.0, -10.0), 4: (10.0, 10.0)}),
-         expect=expect_move(lambda c, s: nx(c, s) <= -15, "track back")),
+         expect=expect_types("INTERCEPT")),
     dict(name="far forward stays as outlet in danger", me=4,
          kw=dict(owner=("opp", 2), opp={2: (-30.0, -8.0)}, mine={1: (-32.0, -6.0), 2: (-28.0, -2.0),
                                                                 3: (-5.0, -10.0), 4: (10.0, 10.0)}),

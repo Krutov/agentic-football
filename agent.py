@@ -62,7 +62,7 @@ CMD_PARAMS_KEY = os.getenv("CMD_PARAMS_KEY", "parameters")
 RESPONSE_WRAPPER = os.getenv("RESPONSE_WRAPPER", "")
 
 # Ticks a maintained command stays active (same values as the official sample fallback)
-COMMAND_DURATION = {"PRESS_BALL": 3, "MARK": 3}
+COMMAND_DURATION = {"PRESS_BALL": 3, "MARK": 3, "INTERCEPT": 3}
 
 MODES = ("balanced", "all_out", "press", "defend", "possession")
 
@@ -460,7 +460,22 @@ def support(s, mode):
 DANGER_X = -18.0  # ball beyond this (our defensive third, doc units) triggers recovery runs
 
 
+def most_dangerous_opponent(s):
+    """Opponent outfield player closest to our goal, if he is in our half."""
+    opps = [o for o in s["opps"] if o["idx"] != 0]
+    if not opps:
+        return None
+    o = min(opps, key=lambda o: dist(o["x"], o["y"], OWN_GOAL_X, 0))
+    return o if o["x"] < 0 else None
+
+
 def defend(s, mode):
+    """Opponent has the ball.
+
+    Live matches have server-side invocation stalls of 5-15 s, so defenders get
+    engine-maintained commands (MARK / INTERCEPT / PRESS_BALL) that keep tracking
+    the play between our decisions, instead of MOVE_TO a fixed point.
+    """
     me, bx, by = s["me"], s["bx"], s["by"]
     outfield = [m for m in s["mates"] if m["idx"] != 0]
     chaser = closest_to_ball(outfield, bx, by)
@@ -471,29 +486,22 @@ def defend(s, mode):
     danger = bx < DANGER_X
 
     if me["idx"] == DEF_IDX:
-        # Single centre back: goal-side of the ball, between it and the goal centre
-        depth = 0.35 if (mode == "defend" or danger) else 0.5
+        target = most_dangerous_opponent(s)
+        if target is not None:
+            return cmd(me["idx"], "MARK", target_player_id=target["idx"], tightness="TIGHT")
+        # Nobody in our half yet: hold a goal-side position
+        depth = 0.35 if mode == "defend" else 0.5
         tx = OWN_GOAL_X + (bx - OWN_GOAL_X) * depth
         return move(s, clamp(tx, -46, -10), by * 0.6, sprint=bx < -20)
 
     if me["idx"] == MID_IDX:
-        if danger:
-            # Recovery run: drop goal-side, screening the centre in front of the centre back
-            tx = OWN_GOAL_X + (bx - OWN_GOAL_X) * 0.6
-            return move(s, clamp(tx, -44, -8), by * 0.4, sprint=True)
-        return cmd(me["idx"], "INTERCEPT", aggressive=mode in ("press", "all_out"))
+        return cmd(me["idx"], "INTERCEPT", aggressive=mode in ("press", "all_out") and not danger)
 
-    # Forwards
-    if danger:
-        # The forward nearer the ball tracks back; the other stays up as the counter outlet
-        fwds = [m for m in s["mates"] if m["idx"] in FWD_IDXS]
-        tracker = closest_to_ball(fwds, bx, by) if fwds else None
-        if tracker is me and mode != "all_out":
-            return move(s, clamp(bx + 8, -38, -6), by * 0.5 + (2 if me["y"] >= 0 else -2), sprint=True)
-        _, fy = FORMATION[me["idx"]]
-        return move(s, -2.0, fy * 0.8)
-    if mode in ("press", "all_out"):
-        return cmd(me["idx"], "INTERCEPT", aggressive=True)
+    # Forwards: the one nearer the ball works back via INTERCEPT, the other stays up as outlet
+    fwds = [m for m in s["mates"] if m["idx"] in FWD_IDXS]
+    nearer = closest_to_ball(fwds, bx, by) if fwds else None
+    if nearer is me or mode in ("press", "all_out"):
+        return cmd(me["idx"], "INTERCEPT", aggressive=mode in ("press", "all_out"))
     _, fy = FORMATION[me["idx"]]
     return move(s, max(bx + 12, 0), fy * 0.8 + by * 0.2)
 
@@ -502,7 +510,8 @@ def loose_ball(s, mode):
     me = s["me"]
     outfield = [m for m in s["mates"] if m["idx"] != 0]
     if closest_to_ball(outfield, s["bx"], s["by"]) is me:
-        return move(s, s["bx"], s["by"], sprint=True)
+        # INTERCEPT keeps tracking the moving ball even if our next call is delayed
+        return cmd(me["idx"], "INTERCEPT", aggressive=True)
     return support(s, mode)
 
 
