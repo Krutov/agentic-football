@@ -39,7 +39,7 @@ EXTENT_LOG_EVERY = int(os.getenv("EXTENT_LOG_EVERY", "25"))
 GOAL_X = 55.0
 OWN_GOAL_X = -55.0
 GOAL_HALF_WIDTH = 3.5          # TODO: verify from logs
-SHOOT_RANGE = 22.0
+SHOOT_RANGE = 30.0          # doc units; shoot from the edge of the attacking third
 SPRINT_STAMINA_MIN = 40.0
 PRESS_STAMINA_MIN = 25.0
 MATCH_LENGTH = float(os.getenv("MATCH_LENGTH", "120"))  # seconds; draws go to Golden Goal after this
@@ -378,7 +378,7 @@ def best_outlet(s, min_gain=-99.0):
         if gain < min_gain:
             continue
         space = nearest_opp_dist(m["x"], m["y"], opps)
-        if space < 4.0 or not lane_clear(me["x"], me["y"], m["x"], m["y"], opps):
+        if space < 3.0 or not lane_clear(me["x"], me["y"], m["x"], m["y"], opps, margin=2.0):
             continue
         score = gain + 1.5 * min(space, 12.0)
         if score > best_score:
@@ -427,19 +427,20 @@ def with_ball(s, mode):
         return cmd(me["idx"], "SHOOT", aim_location=pick_corner(s), power=0.95 if d_goal > 12 else 0.8)
 
     pressure = nearest_opp_dist(me["x"], me["y"], opps)
-    forward = best_outlet(s, min_gain=6.0)
+    forward = best_outlet(s, min_gain=4.0)
     if forward and (mode != "possession" or pressure < 6.0):
         space = nearest_opp_dist(forward["x"], forward["y"], opps)
         ptype = "THROUGH" if forward["x"] > 10 and space > 8 else "GROUND"
         return cmd(me["idx"], "PASS", target_player_id=forward["idx"], type=ptype)
 
-    if pressure < 3.5:
+    if pressure < 6.0:
+        # Under pressure: release to any open teammate instead of losing the ball
         safe = best_outlet(s)
         if safe:
             return cmd(me["idx"], "PASS", target_player_id=safe["idx"], type="GROUND")
 
-    # Carry the ball forward, drifting toward the center
-    return move(s, me["x"] + 10, me["y"] * 0.7, sprint=pressure < 8)
+    # Dribble straight at goal; the engine keeps dribbling until the next decision
+    return move(s, min(me["x"] + 25, GOAL_X - 8), me["y"] * 0.5, sprint=pressure < 10)
 
 
 def support(s, mode):
