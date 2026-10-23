@@ -47,6 +47,19 @@ Set-Location $repoRoot
 function Write-Step([string]$Text) { Write-Host "`n==> $Text" -ForegroundColor Cyan }
 function Fail([string]$Text) { Write-Host "ERROR: $Text" -ForegroundColor Red; exit 1 }
 
+# Native stderr lines arrive as ErrorRecords whose ToString() can be the exception
+# type name; take the original line from TargetObject and drop empty lines.
+function Get-NativeText($Output) {
+    foreach ($item in @($Output)) {
+        $line = if ($item -is [System.Management.Automation.ErrorRecord]) {
+            if ($item.TargetObject -is [string]) { $item.TargetObject } else { $item.Exception.Message }
+        } else { "$item" }
+        if ($line -and $line.Trim() -and $line -notmatch '^System\.Management\.Automation\.RemoteException$') {
+            $line.TrimEnd()
+        }
+    }
+}
+
 $env:AGENTCORE_SUPPRESS_RECOMMENDATION = "1"
 $env:PYTHONUTF8 = "1"
 if (-not $env:AWS_DEFAULT_REGION) { $env:AWS_DEFAULT_REGION = $Region }
@@ -71,11 +84,10 @@ if (-not (Get-Command aws -ErrorAction SilentlyContinue)) {
 
 $identityJson = aws sts get-caller-identity --output json 2>&1
 if ($LASTEXITCODE -ne 0) {
-    # stderr lines arrive as ErrorRecords; keep only their message text
-    $awsError = (($identityJson | ForEach-Object { $_.ToString() }) -join " ").Trim()
+    $awsError = (Get-NativeText $identityJson) -join " "
     Fail "AWS credentials are not valid: $awsError`nSet AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY / AWS_SESSION_TOKEN from the workshop account."
 }
-$identity = ($identityJson | ForEach-Object { $_.ToString() }) -join "`n" | ConvertFrom-Json
+$identity = (Get-NativeText $identityJson) -join "`n" | ConvertFrom-Json
 Write-Host "AWS account: $($identity.Account)  identity: $($identity.Arn)  region: $Region"
 
 # 2. Offline tests
