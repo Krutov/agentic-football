@@ -456,6 +456,9 @@ def support(s, mode):
     return move(s, tx, ty, sprint=far)
 
 
+DANGER_X = -18.0  # ball beyond this (our defensive third, doc units) triggers recovery runs
+
+
 def defend(s, mode):
     me, bx, by = s["me"], s["bx"], s["by"]
     outfield = [m for m in s["mates"] if m["idx"] != 0]
@@ -464,16 +467,30 @@ def defend(s, mode):
         intensity = {"press": 0.9, "all_out": 0.85, "defend": 0.45}.get(mode, 0.7)
         return cmd(me["idx"], "PRESS_BALL", intensity=intensity)
 
+    danger = bx < DANGER_X
+
     if me["idx"] == DEF_IDX:
         # Single centre back: goal-side of the ball, between it and the goal centre
-        depth = 0.35 if mode == "defend" else 0.5
+        depth = 0.35 if (mode == "defend" or danger) else 0.5
         tx = OWN_GOAL_X + (bx - OWN_GOAL_X) * depth
         return move(s, clamp(tx, -46, -10), by * 0.6, sprint=bx < -20)
 
     if me["idx"] == MID_IDX:
+        if danger:
+            # Recovery run: drop goal-side, screening the centre in front of the centre back
+            tx = OWN_GOAL_X + (bx - OWN_GOAL_X) * 0.6
+            return move(s, clamp(tx, -44, -8), by * 0.4, sprint=True)
         return cmd(me["idx"], "INTERCEPT", aggressive=mode in ("press", "all_out"))
 
-    # Forwards: chase in press modes, otherwise hold wide and high for the counter
+    # Forwards
+    if danger:
+        # The forward nearer the ball tracks back; the other stays up as the counter outlet
+        fwds = [m for m in s["mates"] if m["idx"] in FWD_IDXS]
+        tracker = closest_to_ball(fwds, bx, by) if fwds else None
+        if tracker is me and mode != "all_out":
+            return move(s, clamp(bx + 8, -38, -6), by * 0.5 + (2 if me["y"] >= 0 else -2), sprint=True)
+        _, fy = FORMATION[me["idx"]]
+        return move(s, -2.0, fy * 0.8)
     if mode in ("press", "all_out"):
         return cmd(me["idx"], "INTERCEPT", aggressive=True)
     _, fy = FORMATION[me["idx"]]
