@@ -248,6 +248,10 @@ def random_payload(rng: random.Random):
 
 MALFORMED_PAYLOADS = [
     {},
+    {"prompt": "not json"},
+    {"prompt": "[1, 2, 3]"},
+    {"prompt": None},
+    "not a dict",
     {"gameState": {}},
     {"gameState": {"players": []}, "teamId": 1, "myPlayers": [2]},
     {"gameState": {"players": "broken"}, "teamId": 0, "myPlayers": [1]},

@@ -9,8 +9,8 @@ One codebase serves all 5 players; the role comes from `myPlayers[0]` in the pay
 |------|---------|
 | `agent.py` | AgentCore entrypoint, state parsing, rule engine, output adapter |
 | `tests/` | Offline validator, mirrored scenarios for both teams, fuzzing |
-| `scripts/deploy.ps1` | Windows deploy: checks, tests gate, configure/deploy, ARNs |
-| `scripts/agent_arns.py` | Reads ARNs from `.bedrock_agentcore.yaml` |
+| `scripts/deploy.ps1` | Windows wrapper for `team/deploy.py` |
+| `team/` | AgentCore CLI + CDK project (5 runtimes) and `deploy.py` |
 | `sample_payload.json` | Example invocation payload |
 | `.kiro/steering/football.md` | Project context for Kiro |
 
@@ -40,22 +40,33 @@ Invoke-RestMethod -Uri http://localhost:8080/invocations -Method Post -ContentTy
 
 ## Deploy
 
-Set workshop credentials first (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`), then:
+Same pipeline as the official workshop sample teams: AgentCore CLI + CDK, five runtimes
+`football_p0..p4` (same code; role comes from `myPlayers`).
+
+Prerequisites (one-time): Node.js 20+, `npm install -g @aws/agentcore aws-cdk`, [uv](https://docs.astral.sh/uv/).
+Clone to a short path outside OneDrive.
+
+Set workshop credentials (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`), then:
 
 ```powershell
-.\scripts\deploy.ps1                                   # one agent, register its ARN 5 times
-.\scripts\deploy.ps1 -AgentEnv "LOG_RAW_PAYLOAD=true"  # first deploy: log raw payloads to CloudWatch
-.\scripts\deploy.ps1 -Players 5                        # five identical agents if the portal rejects duplicates
-.\scripts\deploy.ps1 -DeploymentType direct_code_deploy  # zip deploy, no container build
+.\scripts\deploy.ps1              # tests -> npm install/cdk bootstrap -> agentcore deploy -> ARNs
+.\scripts\deploy.ps1 -SkipTests
 ```
 
-ARNs are printed and saved to `arns.txt`.
+ARNs are printed and saved to `arns.txt`: register `football_p0` as player 0 (GK), `p1..p4` as players 1..4.
+
+## Wire contract
+
+Matches `lib/agent_base.py` of the official sample agents:
+
+- input: `{"prompt": "<JSON string or object with gameState / teamId / myPlayers>"}`
+- output: streamed JSON string `[{"commandType", "playerId", "teamId", "parameters", "duration"}]`
 
 ## Runtime env vars
 
 | Variable | Default | Meaning |
 |----------|---------|---------|
-| `LOG_RAW_PAYLOAD` | `false` | Log raw payloads (first 8 KB) for format discovery |
+| `LOG_RAW_PAYLOAD` | `first` | `first` = log first `RAW_LOG_LIMIT` (3) payloads per container, `true` = all, `false` = none |
 | `USE_LLM_COACH` | `false` | Parse free-form coach text with Nova Micro when keywords miss |
 | `COACH_MODEL_ID` | `us.amazon.nova-micro-v1:0` | Bedrock model for coach parsing |
 | `CMD_PLAYER_KEY` | `playerId` | Wire key for the player id |
@@ -63,14 +74,8 @@ ARNs are printed and saved to `arns.txt`.
 | `CMD_PARAMS_KEY` | `parameters` | Wire key for parameters; empty string = flat parameters |
 | `RESPONSE_WRAPPER` | empty | Wrap response as `{"<value>": [...]}`; empty = bare list |
 
-Example: platform expects `{"commands": [{"playerId": 2, "type": "PASS", "params": {...}}]}`:
 
-```powershell
-.\scripts\deploy.ps1 -AgentEnv "CMD_TYPE_KEY=type","CMD_PARAMS_KEY=params","RESPONSE_WRAPPER=commands"
-```
+## Open questions
 
-## Open questions to settle at the event
-
-1. Exact command wire format and response wrapper (fix via env vars above).
-2. `TL/TR/BL/BR` mapping to the y axis (`pick_corner()` in `agent.py`).
-3. Goal width (`GOAL_HALF_WIDTH`) and whether the portal accepts one ARN for all 5 players.
+1. `TL/TR/BL/BR` mapping to the y axis (`pick_corner()` in `agent.py`).
+2. Goal width (`GOAL_HALF_WIDTH`).

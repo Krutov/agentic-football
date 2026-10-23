@@ -11,10 +11,10 @@ one footballer in a 5v5 match. The same code serves all 5 players.
 ## Runtime contract
 - Invoked ~every 2 s per player; hard timeout 5 s (on timeout the player keeps its last command).
 - Entry point: `agent.py`, `BedrockAgentCoreApp` + `@app.entrypoint`.
-- Input: `{"gameState": {...}, "teamId": 0|1, "myPlayers": [idx]}`; idx 0 is always the GK.
+- Input: `{"prompt": <JSON string or object>}` wrapping `{"gameState": {...}, "teamId": 0|1, "myPlayers": [idx]}`; idx 0 is always the GK.
 - `teamId` 0 (HOME) attacks +x, 1 (AWAY) attacks -x. Pitch x -55..55, y -35..35.
 - `gameState.teamChat` holds the latest coach instructions from the Player Portal.
-- Output: JSON array of commands, each targeting `playerId` 0-4.
+- Output: streamed JSON string of `[{commandType, playerId, teamId, parameters, duration}]` (same as official sample lib/agent_base.py).
 
 ## Commands
 - MOVE_TO(target_x, target_y, sprint)
@@ -40,4 +40,4 @@ one footballer in a 5v5 match. The same code serves all 5 players.
 - Log one JSON line per decision: tick, player, mode, commands, ms.
 - Wire format is produced only by serialize()/wrap_response(); change it via CMD_* / RESPONSE_WRAPPER env vars, not in the decision logic.
 - After any change run `python -m tests.run` and keep it green; add a scenario in tests/scenarios.py for every new behavior (scenarios are mirrored for both teams).
-- Deploy with `.\scripts\deploy.ps1` (Windows PowerShell); it runs the tests first.
+- Deploy with `.\scripts\deploy.ps1` (wraps team/deploy.py: AgentCore CLI + CDK, 5 runtimes football_p0..p4); it runs the tests first.

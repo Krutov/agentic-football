@@ -8,9 +8,11 @@ Design:
   - The same code serves all 5 players: role comes from payload["myPlayers"][0].
   - All geometry is normalized so that "we" always attack toward +x.
 
-NOTE: the wire format (commandType/parameters, bare list) is an assumption.
-      If the workshop template differs, switch it with the CMD_* and
-      RESPONSE_WRAPPER env vars (see serialize()) instead of editing the logic.
+Wire format (matches the official workshop sample agents, lib/agent_base.py):
+  - input:  {"prompt": "<json string or object with gameState/teamId/myPlayers>"}
+            (an unwrapped payload is accepted too)
+  - output: streamed JSON string of
+            [{"commandType", "playerId", "teamId", "parameters", "duration"}]
 """
 
 import json
@@ -33,19 +35,26 @@ SHOOT_RANGE = 22.0
 SPRINT_STAMINA_MIN = 40.0
 PRESS_STAMINA_MIN = 25.0
 MATCH_LENGTH = float(os.getenv("MATCH_LENGTH", "120"))  # seconds; draws go to Golden Goal after this
-LOG_RAW_PAYLOAD = os.getenv("LOG_RAW_PAYLOAD", "false").lower() == "true"
+# "first" = log the first RAW_LOG_LIMIT payloads per container, "true" = all, "false" = none
+LOG_RAW_PAYLOAD = os.getenv("LOG_RAW_PAYLOAD", "first").lower()
+RAW_LOG_LIMIT = int(os.getenv("RAW_LOG_LIMIT", "3"))
 USE_LLM_COACH = os.getenv("USE_LLM_COACH", "false").lower() == "true"
 COACH_MODEL_ID = os.getenv("COACH_MODEL_ID", "us.amazon.nova-micro-v1:0")
 
 # Output format adapter (switch via env vars without touching the decision logic)
+#   CMD_TEAM_KEY     key for the team id              (default "teamId"; empty = omit)
 #   CMD_PLAYER_KEY   key for the player id            (default "playerId")
 #   CMD_TYPE_KEY     key for the command name         (default "commandType")
 #   CMD_PARAMS_KEY   key for the parameters object    (default "parameters"; empty = flat)
 #   RESPONSE_WRAPPER wrap the list as {key: [...]}    (default empty = bare list)
+CMD_TEAM_KEY = os.getenv("CMD_TEAM_KEY", "teamId")
 CMD_PLAYER_KEY = os.getenv("CMD_PLAYER_KEY", "playerId")
 CMD_TYPE_KEY = os.getenv("CMD_TYPE_KEY", "commandType")
 CMD_PARAMS_KEY = os.getenv("CMD_PARAMS_KEY", "parameters")
 RESPONSE_WRAPPER = os.getenv("RESPONSE_WRAPPER", "")
+
+# Ticks a maintained command stays active (same values as the official sample fallback)
+COMMAND_DURATION = {"PRESS_BALL": 3, "MARK": 3}
 
 MODES = ("balanced", "all_out", "press", "defend", "possession")
 
@@ -67,6 +76,7 @@ KEYWORDS = [
 
 _coach_cache = {}
 _bedrock = None
+_raw_logged = 0
 
 
 # ---------- helpers ----------
@@ -76,14 +86,17 @@ def cmd(player_id, command_type, **params):
     return {"playerId": player_id, "commandType": command_type, "parameters": params}
 
 
-def serialize(commands, player_key=None, type_key=None, params_key=None):
+def serialize(commands, team_id=0, player_key=None, type_key=None, params_key=None, team_key=None):
     """Convert canonical commands into the wire format configured via env vars."""
+    team_key = CMD_TEAM_KEY if team_key is None else team_key
     player_key = CMD_PLAYER_KEY if player_key is None else player_key
     type_key = CMD_TYPE_KEY if type_key is None else type_key
     params_key = CMD_PARAMS_KEY if params_key is None else params_key
     out = []
     for c in commands:
-        item = {player_key: c["playerId"], type_key: c["commandType"]}
+        item = {type_key: c["commandType"], player_key: c["playerId"]}
+        if team_key:
+            item[team_key] = team_id
         if params_key:
             item[params_key] = dict(c["parameters"])
         else:
@@ -92,6 +105,7 @@ def serialize(commands, player_key=None, type_key=None, params_key=None):
                     log.warning("Flat format: parameter '%s' collides with a reserved key, skipped", k)
                     continue
                 item[k] = v
+        item["duration"] = COMMAND_DURATION.get(c["commandType"], 0)
         out.append(item)
     return out
 
@@ -142,7 +156,23 @@ def move(s, x, y, sprint=False):
 
 # ---------- state parsing ----------
 
+def unwrap_payload(payload):
+    """Return the inner request: payload["prompt"] (JSON string or dict) or the payload itself."""
+    if not isinstance(payload, dict):
+        return {}
+    if "prompt" in payload and "gameState" not in payload:
+        inner = payload["prompt"]
+        if isinstance(inner, str):
+            try:
+                inner = json.loads(inner)
+            except ValueError:
+                return {}
+        return inner if isinstance(inner, dict) else {}
+    return payload
+
+
 def parse_state(payload):
+    payload = unwrap_payload(payload)
     gs = payload.get("gameState", payload)
     team_id = int(payload.get("teamId", 0))
     sign = 1.0 if team_id == 0 else -1.0
@@ -414,13 +444,25 @@ def decide(s):
 
 # ---------- AgentCore entrypoint ----------
 
-@app.entrypoint
-def invoke(payload):
+def _log_raw(payload):
+    global _raw_logged
+    if LOG_RAW_PAYLOAD == "true" or (LOG_RAW_PAYLOAD == "first" and _raw_logged < RAW_LOG_LIMIT):
+        _raw_logged += 1
+        try:
+            log.info("RAW %s", json.dumps(payload, default=str)[:8000])
+        except Exception:
+            log.info("RAW (unserializable) %r", payload)
+
+
+def handle(payload):
+    """Pure request handler: payload -> wire-format response object. Never raises."""
     started = time.perf_counter()
-    if LOG_RAW_PAYLOAD:
-        log.info("RAW %s", json.dumps(payload)[:8000])
+    _log_raw(payload)
+    team_id = 0
     try:
-        state = parse_state(payload)
+        inner = unwrap_payload(payload)
+        team_id = int(inner.get("teamId", 0) or 0)
+        state = parse_state(inner)
         commands, mode = decide(state)
         log.info(json.dumps({
             "tick": state["tick"],
@@ -429,10 +471,16 @@ def invoke(payload):
             "commands": commands,
             "ms": round((time.perf_counter() - started) * 1000, 1),
         }))
-        return wrap_response(serialize(commands))
+        return wrap_response(serialize(commands, team_id))
     except Exception:
         log.exception("Decision failed, returning no commands")
         return wrap_response([])
+
+
+@app.entrypoint
+async def invoke(payload, context=None):
+    """AgentCore entrypoint; streams one JSON string like the official sample agents."""
+    yield json.dumps(handle(payload))
 
 
 if __name__ == "__main__":

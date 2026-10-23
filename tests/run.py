@@ -9,6 +9,8 @@ Exit code 0 = all checks passed, 1 = at least one failure.
 """
 
 import argparse
+import asyncio
+import json
 import logging
 import random
 import statistics
@@ -88,9 +90,9 @@ def run_malformed(rep):
     for i, payload in enumerate(MALFORMED_PAYLOADS):
         where = f"[malformed #{i}]"
         try:
-            out = agent.invoke(payload)
-        except Exception as e:  # invoke must never raise
-            rep.fail(where, f"invoke raised {type(e).__name__}: {e}")
+            out = agent.handle(payload)
+        except Exception as e:  # handle must never raise
+            rep.fail(where, f"handle raised {type(e).__name__}: {e}")
             continue
         if not isinstance(out, (list, dict)):
             rep.fail(where, f"unexpected response type {type(out).__name__}")
@@ -98,32 +100,69 @@ def run_malformed(rep):
         rep.ok()
 
 
-def run_invoke_roundtrip(rep):
-    payload = build_payload(0, 4, mine={4: (40.0, 0.0)}, owner=("mine", 4))
-    out = agent.invoke(payload)
-    expected_default = [{"playerId": 4, "commandType": "SHOOT"}]
-    if not (isinstance(out, list) and len(out) == 1
-            and all(out[0].get(k) == v for k, v in expected_default[0].items())
-            and "parameters" in out[0]):
-        rep.fail("[invoke] default wire format", f"unexpected response {out!r}")
-    else:
+def _check_wire(rep, where, out, team_id, player_id, ctype):
+    ok = (isinstance(out, list) and len(out) == 1 and isinstance(out[0], dict)
+          and out[0].get("commandType") == ctype
+          and out[0].get("playerId") == player_id
+          and out[0].get("teamId") == team_id
+          and isinstance(out[0].get("parameters"), dict)
+          and isinstance(out[0].get("duration"), int))
+    if ok:
         rep.ok()
+    else:
+        rep.fail(where, f"unexpected response {out!r}")
+
+
+def run_invoke_roundtrip(rep):
+    """Wire contract of the official sample agents: prompt-wrapped input, streamed JSON string."""
+    for team_id in (0, 1):
+        inner = build_payload(team_id, 4, mine={4: (40.0, 0.0)}, owner=("mine", 4))
+        variants = {
+            "bare payload": inner,
+            "prompt as JSON string": {"prompt": json.dumps(inner)},
+            "prompt as object": {"prompt": inner},
+        }
+        for name, payload in variants.items():
+            _check_wire(rep, f"[handle] {name} (team {team_id})", agent.handle(payload),
+                        team_id, 4, "SHOOT")
+
+        async def collect():
+            return [chunk async for chunk in agent.invoke({"prompt": json.dumps(inner)}, None)]
+
+        where = f"[invoke] streamed response (team {team_id})"
+        chunks = asyncio.run(collect())
+        if len(chunks) != 1 or not isinstance(chunks[0], str):
+            rep.fail(where, f"expected one JSON string chunk, got {chunks!r}")
+            continue
+        try:
+            decoded = json.loads(chunks[0])
+        except ValueError as e:
+            rep.fail(where, f"chunk is not valid JSON: {e}")
+            continue
+        _check_wire(rep, where, decoded, team_id, 4, "SHOOT")
 
 
 def run_serializer(rep):
-    canonical = [agent.cmd(2, "PASS", target_player_id=4, type="THROUGH")]
+    canonical = [agent.cmd(2, "PASS", target_player_id=4, type="THROUGH"),
+                 agent.cmd(2, "PRESS_BALL", intensity=0.7)]
+    params_pass = {"target_player_id": 4, "type": "THROUGH"}
     cases = [
-        ("nested default", dict(), None,
-         [{"playerId": 2, "commandType": "PASS", "parameters": {"target_player_id": 4, "type": "THROUGH"}}]),
-        ("flat", dict(params_key=""), None,
-         [{"playerId": 2, "commandType": "PASS", "target_player_id": 4, "type": "THROUGH"}]),
-        ("custom keys", dict(player_key="player_id", type_key="action", params_key="args"), None,
-         [{"player_id": 2, "action": "PASS", "args": {"target_player_id": 4, "type": "THROUGH"}}]),
-        ("wrapped", dict(), "commands",
-         {"commands": [{"playerId": 2, "commandType": "PASS",
-                        "parameters": {"target_player_id": 4, "type": "THROUGH"}}]}),
-        ("flat collision keeps command name", dict(type_key="type", params_key=""), None,
-         [{"playerId": 2, "type": "PASS", "target_player_id": 4}]),
+        ("default (sample contract)", dict(team_id=1), None,
+         [{"commandType": "PASS", "playerId": 2, "teamId": 1, "parameters": params_pass, "duration": 0},
+          {"commandType": "PRESS_BALL", "playerId": 2, "teamId": 1, "parameters": {"intensity": 0.7},
+           "duration": 3}]),
+        ("flat, no team", dict(params_key="", team_key=""), None,
+         [{"commandType": "PASS", "playerId": 2, "target_player_id": 4, "type": "THROUGH", "duration": 0},
+          {"commandType": "PRESS_BALL", "playerId": 2, "intensity": 0.7, "duration": 3}]),
+        ("custom keys", dict(team_id=0, player_key="player_id", type_key="action", params_key="args",
+                             team_key="team"), None,
+         [{"action": "PASS", "player_id": 2, "team": 0, "args": params_pass, "duration": 0},
+          {"action": "PRESS_BALL", "player_id": 2, "team": 0, "args": {"intensity": 0.7}, "duration": 3}]),
+        ("wrapped", dict(team_id=0), "commands",
+         {"commands": [
+             {"commandType": "PASS", "playerId": 2, "teamId": 0, "parameters": params_pass, "duration": 0},
+             {"commandType": "PRESS_BALL", "playerId": 2, "teamId": 0, "parameters": {"intensity": 0.7},
+              "duration": 3}]}),
     ]
     for name, kwargs, wrapper, expected in cases:
         got = agent.wrap_response(agent.serialize(canonical, **kwargs), wrapper=wrapper)
@@ -152,7 +191,7 @@ def main():
 
     lat = rep.latencies
     print(f"Scenarios: {len(SCENARIOS)} x 2 teams | fuzz: {args.fuzz} | "
-          f"malformed: {len(MALFORMED_PAYLOADS)} | serializer: 5 | invoke: 1")
+          f"malformed: {len(MALFORMED_PAYLOADS)} | serializer: 4 | wire contract: 8")
     if lat:
         p95 = sorted(lat)[int(len(lat) * 0.95) - 1]
         print(f"Decision latency: median {statistics.median(lat):.3f} ms, "

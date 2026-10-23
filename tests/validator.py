@@ -43,6 +43,7 @@ SPEC = {
     "SHOOT": {"aim_location": _enum(*AIM_LOCATIONS), "power": _num(0.0, 1.0)},
     "PASS": {"target_player_id": _int(0, 4), "type": _enum(*PASS_TYPES)},
     "GK_DISTRIBUTE": {"target_player_id": _int(0, 4), "method": _enum("THROW", "KICK")},
+    "SLIDE_TACKLE": {"target_player_id": _int(-1, 4), "sprint": _bool, "distance": _num(0, 120)},
     "PRESS_BALL": {"intensity": _num(0.0, 1.0)},
     "MARK": {"target_player_id": _int(0, 4), "tightness": _enum("LOOSE", "TIGHT")},
     "INTERCEPT": {"aggressive": _bool},
